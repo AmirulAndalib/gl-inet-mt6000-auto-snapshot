@@ -1,0 +1,38 @@
+name: 📦 GL.iNet MT6000 Firmware Mirror
+
+on:
+  workflow_dispatch: # Allow manual run
+  schedule:
+    # Run at 04:00 UTC daily (12:00 PM Hong Kong Time)
+    # Ensures nightly builds are finished and uploaded by GL.iNet
+    - cron: '0 4 * * *'
+
+permissions:
+  contents: write # Required to create releases and commit the history file
+
+jobs:
+  check-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🛡️ Checkout Repository
+        uses: actions/checkout@main
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@main
+        with:
+          python-version: '3.12'
+
+      - name: 📦 Install Dependencies
+        run: pip install requests markdownify
+
+      - name: 🚀 Run Release Processor
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MODEL: "mt6000"
+        run: python scripts/process_releases.py
+
+      - name: 💾 Commit Release History
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "🤖 db: update release_history.json [skip ci]"
+          file_pattern: "release_history.json"
