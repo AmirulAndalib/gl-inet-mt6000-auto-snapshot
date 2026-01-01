@@ -32,23 +32,21 @@ if [ -z "$JSON_DATA" ]; then
     exit 1
 fi
 
-# Parse JSON - extract SNAPSHOT block data
-# The JSON has multiple firmware entries, we need the SNAPSHOT one
-# Strategy: Split on "stage":"SNAPSHOT" and extract fields from surrounding context
+# Parse JSON - The structure is:
+# { "version": "4.8.4", "stage": "SNAPSHOT", ... "download": [{ "compile_time": X, "link": "...", "sha256": "..." }] }
+# Version comes BEFORE stage, download details come AFTER
 
-# Extract version - try after SNAPSHOT marker first, then before
-LATEST_VERSION=$(echo "$JSON_DATA" | awk -F'"stage":"SNAPSHOT"' '{print $2}' | awk -F'"version":"' '{print $1}' | awk -F'"' '{print $2}' | head -n1)
-if [ -z "$LATEST_VERSION" ]; then
-    LATEST_VERSION=$(echo "$JSON_DATA" | awk -F'"stage":"SNAPSHOT"' '{print $1}' | awk -F'"version":"' '{print $NF}' | awk -F'"' '{print $1}')
-fi
+# Extract the SNAPSHOT block first (everything from version before SNAPSHOT to its download block)
+# Get version - it appears BEFORE "stage":"SNAPSHOT" in the same object
+LATEST_VERSION=$(echo "$JSON_DATA" | awk -F'"stage":"SNAPSHOT"' '{print $1}' | awk -F'"version":"' '{print $NF}' | awk -F'"' '{print $1}')
 
-# Extract compile time
+# Get download block after SNAPSHOT marker - extract compile_time
 REMOTE_TIME=$(echo "$JSON_DATA" | awk -F'"stage":"SNAPSHOT"' '{print $2}' | awk -F'"compile_time":' '{print $2}' | awk -F'[,}]' '{print $1}' | head -n1 | tr -d ' ')
 
-# Extract download link
+# Get download link
 DOWNLOAD_URL=$(echo "$JSON_DATA" | awk -F'"stage":"SNAPSHOT"' '{print $2}' | awk -F'"link":"' '{print $2}' | awk -F'"' '{print $1}' | head -n1)
 
-# Extract SHA256
+# Get SHA256
 REMOTE_SHA256=$(echo "$JSON_DATA" | awk -F'"stage":"SNAPSHOT"' '{print $2}' | awk -F'"sha256":"' '{print $2}' | awk -F'"' '{print $1}' | head -n1)
 
 # Validate parsed data
