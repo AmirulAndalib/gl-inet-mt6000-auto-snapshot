@@ -186,7 +186,6 @@ def create_github_release(
     url = download_info["link"]
 
     tag_name = generate_release_tag(version, stage, compile_time)
-    is_prerelease = stage != "RELEASE"
 
     release_title = f"GL-MT6000 {stage.title()} {version}"
     if stage != "RELEASE":
@@ -216,13 +215,8 @@ def create_github_release(
         release_body,
         "--repo",
         github_repo,
+        "--latest",
     ]
-
-    if is_prerelease:
-        cmd.append("--prerelease")
-        cmd.append("--latest=false")
-    else:
-        cmd.append("--latest")
 
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True)
