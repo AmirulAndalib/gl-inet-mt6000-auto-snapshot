@@ -13,9 +13,11 @@ This project provides a lightweight, self-preserving shell script that automatic
 - **Self-Preserving**: Automatically registers itself in `/etc/sysupgrade.conf` to survive firmware upgrades
 - **Checksum Verification**: Validates SHA256 checksums before flashing to prevent corrupted firmware installation
 - **Duplicate Prevention**: Tracks installed firmware timestamps to avoid unnecessary re-flashing
-- **Retry Logic**: Automatic retry mechanism for failed API requests and downloads
-- **Lock File Protection**: Prevents concurrent execution of multiple update instances
-- **System Logging**: Integrates with syslog for centralized logging and debugging
+- **Safe Retry on Failure**: If `sysupgrade` rejects the image, the stored timestamp is restored so the next run tries again
+- **Retry Logic**: API requests and downloads are retried up to 3 times
+- **Lock Protection**: An atomic lock directory (`/tmp/gl_autoupdate.lock`) prevents concurrent runs
+- **System Logging**: Messages go to stdout and to syslog (tag `gl_autoupdate`)
+- **Dry Run**: `-n` checks, downloads and verifies without flashing
 
 ## Requirements
 
@@ -66,6 +68,14 @@ Run the updater manually to check for and apply updates:
 /usr/bin/gl_autoupdate.sh
 ```
 
+### Dry Run
+
+Check for an update, download it and verify the checksum without flashing:
+
+```bash
+/usr/bin/gl_autoupdate.sh -n
+```
+
 ### Scheduled Updates
 
 To automatically check for updates daily at 5:00 AM, add a cron job:
@@ -87,8 +97,9 @@ crontab -l
 | `[INFO] Fetching firmware info...` | Querying the GL.iNet firmware API |
 | `Channel: SNAPSHOT` | Confirmed SNAPSHOT channel firmware found |
 | `[INFO] System is up to date` | No newer firmware available |
-| `[INFO] New SNAPSHOT firmware available` | Update detected; download starting |
+| `[INFO] New SNAPSHOT firmware available, starting download...` | Update detected; download starting |
 | `[INFO] Starting system upgrade` | Firmware verified; initiating sysupgrade |
+| `[ERROR] Another instance is running` | Lock held by another run; remove `/tmp/gl_autoupdate.lock` if stale |
 
 ## Technical Details
 
@@ -122,23 +133,45 @@ This ensures both the script and its state file survive the upgrade process.
 
 ## GitHub Actions Integration
 
-This repository includes automated workflows that:
+The `GL.iNet MT6000 Firmware Release` workflow runs daily (and on demand) and:
 
-1. Periodically check for new firmware releases
-2. Download and verify new firmware files
-3. Create GitHub releases with attached firmware binaries
-4. Maintain release history to prevent duplicates
+1. Fetches the firmware list from the GL.iNet API (all channels: RELEASE, TESTING, SNAPSHOT)
+2. Skips builds already published, matched by SHA256 against `release_history.json` and against the digests and file names of assets already on GitHub
+3. Downloads each new build and checks its SHA256 and size against the API before uploading
+4. Creates one GitHub release per build and records it in `release_history.json`
 
-The release processor script (`scripts/process_releases.py`) handles all release automation tasks.
+Tag scheme:
+
+| Build | Tag |
+| :--- | :--- |
+| Stable release | `v<version>` |
+| Stable respin (GL.iNet re-published the same version with a new binary) | `v<version>-<compile_time>` |
+| Testing / snapshot | `v<version>-<stage>-<compile_time>` |
+
+Only the build with the newest compile time in the API response is marked "Latest", so a late respin of an old version cannot take it over.
+
+To preview what a run would do, start the workflow manually with **dry_run** checked, or run locally:
+
+```bash
+DRY_RUN=1 GITHUB_REPOSITORY=<owner>/<repo> GH_TOKEN=$(gh auth token) python scripts/process_releases.py
+```
+
+A second `CI` workflow lints and tests both scripts, including the router script under BusyBox `ash`.
 
 ## File Structure
 
 ```
 gl-inet-mt6000-auto-snapshot/
-├── gl_autoupdate.sh          # Router-side auto-update script
-├── release_history.json      # Tracks processed firmware releases
+├── gl_autoupdate.sh                # Router-side auto-update script
+├── release_history.json            # SHA256 of every published build
 ├── scripts/
-│   └── process_releases.py   # GitHub release automation
+│   └── process_releases.py         # GitHub release automation
+├── tests/
+│   ├── test_process_releases.py    # pytest suite for the release script
+│   └── test_gl_autoupdate.sh       # Router script tests with fake wget/sysupgrade
+├── .github/workflows/
+│   ├── glinet_release.yml          # Daily release job
+│   └── ci.yml                      # Lint and tests
 └── README.md
 ```
 
@@ -147,7 +180,8 @@ gl-inet-mt6000-auto-snapshot/
 - All firmware downloads are verified using SHA256 checksums
 - The script only executes sysupgrade after successful verification
 - Failed downloads or checksum mismatches abort the update process
-- Lock files prevent race conditions from concurrent executions
+- A lock directory prevents concurrent executions on the router
+- The release workflow verifies every download against the API checksum before publishing it
 
 ## Troubleshooting
 
@@ -156,7 +190,17 @@ gl-inet-mt6000-auto-snapshot/
 Ensure your firmware includes the required utilities:
 
 ```bash
-which wget sha256sum sysupgrade
+which wget sha256sum awk sysupgrade
+```
+
+## Development
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest -q
+ruff check scripts tests
+shellcheck -s sh gl_autoupdate.sh tests/test_gl_autoupdate.sh
+sh tests/test_gl_autoupdate.sh                               # or SHELL_UNDER_TEST="busybox ash"
 ```
 
 ### API request timeout
