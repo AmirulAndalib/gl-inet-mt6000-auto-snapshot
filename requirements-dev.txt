@@ -1,0 +1,4 @@
+-r requirements.txt
+pytest>=8.0
+ruff>=0.6
+shellcheck-py>=0.10
