@@ -99,9 +99,25 @@ rm -rf "$WORK"
 
 setup
 mkdir "$WORK/lock"
+echo "$$" > "$WORK/lock/pid"
 run
 rc=$?
 check "second instance refuses to run" '[ $rc -ne 0 ] && grep -q "Another instance" "$WORK/out.log" && [ -d "$WORK/lock" ]'
+rm -rf "$WORK"
+
+setup
+mkdir "$WORK/lock"
+sh -c 'echo $$' > "$WORK/lock/pid"
+run
+rc=$?
+check "stale lock from a dead process is taken over" '[ $rc -eq 0 ] && grep -q "Removing stale lock" "$WORK/out.log" && [ ! -d "$WORK/lock" ]'
+rm -rf "$WORK"
+
+setup
+mkdir "$WORK/lock"
+run
+rc=$?
+check "lock without pid file is treated as stale" '[ $rc -eq 0 ] && grep -q "Removing stale lock" "$WORK/out.log"'
 rm -rf "$WORK"
 
 setup

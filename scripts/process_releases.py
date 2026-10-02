@@ -296,6 +296,26 @@ echo "{build.sha256}  {build.filename}" | sha256sum -c -
 # --------------------------------------------------------------------------
 
 
+def add_release_to_state(state: PublishedState, release: dict[str, Any]) -> None:
+    """
+    Record one GitHub release.
+
+    The tag always blocks reuse. Assets only count as published when the
+    release is not a draft and the upload finished; otherwise a half-failed
+    upload would mark the build as done and it would never be retried.
+    """
+    state.tags.add(release["tag_name"])
+    if release.get("draft"):
+        return
+    for asset in release.get("assets", []):
+        if asset.get("state", "uploaded") != "uploaded":
+            continue
+        state.asset_names.add(asset["name"])
+        digest = asset.get("digest") or ""
+        if digest.startswith("sha256:"):
+            state.sha256s.add(digest.split(":", 1)[1].lower())
+
+
 def fetch_published_state(
     session: requests.Session, repo: str, token: str | None, history: list[str]
 ) -> PublishedState:
@@ -314,12 +334,7 @@ def fetch_published_state(
         response = session.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
         for release in response.json():
-            state.tags.add(release["tag_name"])
-            for asset in release.get("assets", []):
-                state.asset_names.add(asset["name"])
-                digest = asset.get("digest") or ""
-                if digest.startswith("sha256:"):
-                    state.sha256s.add(digest.split(":", 1)[1].lower())
+            add_release_to_state(state, release)
         url = response.links.get("next", {}).get("url")
 
     # Releases can exist without a release object only in odd cases, but a

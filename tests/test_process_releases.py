@@ -116,6 +116,37 @@ class TestPublished:
         assert not pr.is_published(b, empty_state())
 
 
+class TestAddRelease:
+    def asset(self, name, state="uploaded", sha="ab" * 32):
+        return {"name": name, "state": state, "digest": f"sha256:{sha}"}
+
+    def test_uploaded_asset_counts(self):
+        state = empty_state()
+        pr.add_release_to_state(
+            state, {"tag_name": "v1", "draft": False, "assets": [self.asset("a.bin")]}
+        )
+        assert state.tags == {"v1"}
+        assert state.asset_names == {"a.bin"}
+        assert state.sha256s == {"ab" * 32}
+
+    def test_draft_only_blocks_tag(self):
+        state = empty_state()
+        pr.add_release_to_state(
+            state, {"tag_name": "v1", "draft": True, "assets": [self.asset("a.bin")]}
+        )
+        assert state.tags == {"v1"}
+        assert not state.asset_names
+        assert not state.sha256s
+
+    def test_partial_upload_ignored(self):
+        state = empty_state()
+        pr.add_release_to_state(
+            state,
+            {"tag_name": "v1", "assets": [self.asset("a.bin", state="starter")]},
+        )
+        assert not state.asset_names
+
+
 class TestProcess:
     @pytest.fixture(autouse=True)
     def tmp_history(self, tmp_path, monkeypatch):
