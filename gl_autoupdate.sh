@@ -67,9 +67,18 @@ else
 fi
 
 # Only one instance at a time. mkdir is atomic, unlike test-then-touch.
+# A lock left by a killed run (OOM, power loss) is detected by its pid and
+# taken over, so it cannot block updates until the next reboot.
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-    die "Another instance is running (remove $LOCK_DIR if it is stale)"
+    LOCK_PID=$(cat "$LOCK_DIR/pid" 2>/dev/null)
+    if [ -n "$LOCK_PID" ] && kill -0 "$LOCK_PID" 2>/dev/null; then
+        die "Another instance is running (pid $LOCK_PID)"
+    fi
+    log WARN "Removing stale lock $LOCK_DIR (pid '${LOCK_PID}')"
+    rm -rf "$LOCK_DIR"
+    mkdir "$LOCK_DIR" 2>/dev/null || die "Could not acquire lock $LOCK_DIR"
 fi
+echo "$$" > "$LOCK_DIR/pid"
 trap 'rm -rf "$LOCK_DIR"' EXIT
 trap 'exit 1' INT TERM
 
